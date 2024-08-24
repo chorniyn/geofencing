@@ -1,5 +1,6 @@
 package com.example.locationtime
 
+import android.app.Notification
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -12,6 +13,9 @@ import kotlinx.coroutines.runBlocking
 import java.time.Instant
 import java.time.ZoneId
 import java.time.ZonedDateTime
+import android.app.NotificationManager
+import android.app.NotificationChannel
+import android.app.PendingIntent
 
 class GeofenceBroadcastReceiver: BroadcastReceiver() {
     companion object {
@@ -51,6 +55,27 @@ class GeofenceBroadcastReceiver: BroadcastReceiver() {
                         locationTime?.toInstant()?.toEpochMilli() ?: 0
                     }"
                 }
+                val name = "Geofence"
+                val descriptionText = "Geofence"
+                val importance = NotificationManager.IMPORTANCE_HIGH
+                val channel = NotificationChannel("geofences", name, importance).apply {
+                    description = descriptionText
+                }
+                // Register the channel with the system.
+                val notificationManager: NotificationManager =
+                    context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                notificationManager.createNotificationChannel(channel)
+                val newIntent = Intent(context, MainActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+                }
+                val pendingIntent: PendingIntent = PendingIntent.getActivity(context, 0, newIntent, PendingIntent.FLAG_IMMUTABLE)
+
+                notificationManager.notify(100, Notification.Builder(context, channel.id)
+                    .setSmallIcon(R.drawable.ic_launcher_background)
+                    .setContentTitle("Geofence " + (if (e) "Enter" else "Exit"))
+                    .setContentText("Geofence works")
+                    .setContentIntent(pendingIntent)
+                    .build())
             }
         }
     }

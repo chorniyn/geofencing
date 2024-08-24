@@ -2,6 +2,9 @@ package com.example.locationtime
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
@@ -35,6 +38,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -53,7 +57,9 @@ import com.example.locationtime.GeofenceBroadcastReceiver.Companion.TAG
 import com.example.locationtime.ui.theme.LocationTimeTheme
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.PermissionState
+import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
+import com.google.accompanist.permissions.rememberPermissionState
 import com.google.android.gms.location.Geofence
 import com.google.android.gms.location.GeofencingRequest
 import com.google.android.gms.location.LocationCallback
@@ -61,6 +67,8 @@ import com.google.android.gms.location.LocationRequest
 import com.google.android.gms.location.LocationResult
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 import java.time.Instant
 import java.time.ZoneId
 import java.time.ZonedDateTime
@@ -87,14 +95,27 @@ class MainActivity : ComponentActivity() {
                     val locationPermissions = rememberMultiplePermissionsState(
                         listOf(
                             Manifest.permission.ACCESS_FINE_LOCATION,
-                            Manifest.permission.ACCESS_COARSE_LOCATION
+                            Manifest.permission.ACCESS_COARSE_LOCATION,
+                            Manifest.permission.POST_NOTIFICATIONS
                         )
                     )
                     if (locationPermissions.allPermissionsGranted) {
-                        LocationUpdatesContent(
-                            usePreciseLocation = false,
-                            modifier = Modifier.padding(innerPadding)
+                        val backgroundLocationPermissions = rememberPermissionState(
+                            Manifest.permission.ACCESS_BACKGROUND_LOCATION
                         )
+                        if (backgroundLocationPermissions.status.isGranted) {
+                            LocationUpdatesContent(
+                                usePreciseLocation = false,
+                                modifier = Modifier.padding(innerPadding)
+                            )
+                        } else {
+                            Button(
+                                onClick = { backgroundLocationPermissions.launchPermissionRequest() },
+                                modifier = Modifier.padding(innerPadding)
+                            ) {
+                                Text(text = "Background Location")
+                            }
+                        }
                     } else {
                         Column(modifier = Modifier.padding(innerPadding)) {
                             Text(
@@ -172,47 +193,56 @@ fun LocationUpdatesContent(usePreciseLocation: Boolean, modifier: Modifier = Mod
             }.sortedBy { g -> g.receivedTime }
         }
     }
+    val scope = rememberCoroutineScope()
     LazyColumn(
         modifier = modifier
             .fillMaxWidth(),
     ) {
         item {
             Button(onClick = {
-                val geofencingClient = LocationServices.getGeofencingClient(context)
-                val intent = Intent(context, GeofenceBroadcastReceiver::class.java)
-                val pi = PendingIntent.getBroadcast(context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE)
-                geofencingClient.addGeofences(GeofencingRequest.Builder()
-                    .addGeofence(
-                        Geofence.Builder()
-                        // Set the request ID of the geofence. This is a string to identify this
-                        // geofence.
-                        .setRequestId("home")
+                scope.launch {
+                    val geofencingClient = LocationServices.getGeofencingClient(context)
+                    val intent = Intent(context, GeofenceBroadcastReceiver::class.java)
+                    val pi = PendingIntent.getBroadcast(
+                        context,
+                        0,
+                        intent,
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
+                    )
+                    geofencingClient.removeGeofences(listOf("home")).await()
+                    geofencingClient.addGeofences(
+                        GeofencingRequest.Builder()
+                            .addGeofences(listOf(
+                                Geofence.Builder()
+                                    // Set the request ID of the geofence. This is a string to identify this
+                                    // geofence.
+                                    .setRequestId("home")
 
-                        // Set the circular region of this geofence.
-                        .setCircularRegion(
-                            49.43586168130942,
-                            32.07911368372347,
-                            100.0f
-                        )
+                                    // Set the circular region of this geofence.
+                                    .setCircularRegion(
+                                        49.43586168130942,
+                                        32.07911368372347,
+                                        100.0f
+                                    )
 
-                        // Set the expiration duration of the geofence. This geofence gets automatically
-                        // removed after this period of time.
-                        .setExpirationDuration(Geofence.NEVER_EXPIRE)
+                                    // Set the expiration duration of the geofence. This geofence gets automatically
+                                    // removed after this period of time.
+                                    .setExpirationDuration(Geofence.NEVER_EXPIRE)
 
-                        // Set the transition types of interest. Alerts are only generated for these
-                        // transition. We track entry and exit transitions in this sample.
-                        .setTransitionTypes(Geofence.GEOFENCE_TRANSITION_ENTER or Geofence.GEOFENCE_TRANSITION_EXIT)
+                                    // Set the transition types of interest. Alerts are only generated for these
+                                    // transition. We track entry and exit transitions in this sample.
+                                    .setTransitionTypes(Geofence.GEOFENCE_TRANSITION_ENTER or Geofence.GEOFENCE_TRANSITION_EXIT)
 
-                        // Create the geofence.
-                        .build())
-                    .setInitialTrigger(GeofencingRequest.INITIAL_TRIGGER_ENTER)
-                    .build(), pi).addOnSuccessListener {
-                        Log.i(TAG, "Set up")
-                    }.addOnFailureListener {
-                    Log.i(TAG, "Failed", it)
+                                    // Create the geofence.
+                                    .build()
+                            ))
+                            .setInitialTrigger(GeofencingRequest.INITIAL_TRIGGER_ENTER)
+                            .build(), pi
+                    ).await()
+                    Log.i(TAG, "Geofences set up")
                 }
             }) {
-             Text(text = "Geofences")
+                Text(text = "Geofences")
             }
         }
         item {
